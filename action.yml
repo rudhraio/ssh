@@ -1,0 +1,78 @@
+name: 'Run SSH commands'
+description: 'Execute SSH commands on a remote server'
+inputs:
+  host:
+    description: 'Host name or IP address'
+    required: true
+  user:
+    description: 'Username for SSH login'
+    required: true
+  password:
+    description: 'SSH password'
+    required: false
+    default: ""
+  key:
+    description: 'SSH private key'
+    required: false
+    default: ""
+  passphrase:
+    description: 'SSH passphrase for key'
+    required: false
+  port:
+    description: 'SSH port number'
+    required: false
+    default: 22
+  name:
+    description: 'Server name or identifier'
+    required: false
+    default: "server"
+  commands:
+    description: 'List of commands to execute on the server'
+    required: true
+runs:
+  using: 'composite'
+  steps:
+    - name: Setup SSH Configuration
+      run: |
+        mkdir -p ~/.ssh/
+        echo "Host ${{ inputs.name }}" >> ~/.ssh/config
+        echo "  HostName ${{ inputs.host }}" >> ~/.ssh/config
+        echo "  Port ${{ inputs.port }}" >> ~/.ssh/config
+        echo "  User ${{ inputs.user }}" >> ~/.ssh/config
+        if [ -n "${{ inputs.key }}" ]; then
+            echo "${{ inputs.key }}" > ~/.ssh/${{ inputs.name }}.key
+            echo "  IdentityFile ~/.ssh/${{ inputs.name }}.key" >> ~/.ssh/config
+            chmod 600 ~/.ssh/${{ inputs.name }}.key
+            ssh-keyscan -H ${{ inputs.host }} >> ~/.ssh/known_hosts
+            if [ -n "${{ inputs.passphrase }}" ]; then
+                ssh-keygen -p -P ${{ inputs.passphrase }} -N "" -f ~/.ssh/${{ inputs.name }}.key
+            fi
+        elif [ -n "${{ inputs.password }}" ]; then
+          sudo apt-get install openssh-client -y
+          sudo apt-get install sshpass -y
+        else
+          echo "No authentication method provided"
+          exit 1
+        fi
+        ssh-keyscan -H ${{ inputs.host }} >> ~/.ssh/known_hosts
+        echo "SSH setup done"
+      shell: bash
+
+    - name: Execute Commands
+      run: |
+        ssh_cmd="ssh -o ConnectTimeout=10"
+        if [ -n "${{ inputs.password }}" ]; then
+          sshpass -p "${{ inputs.password }}" $ssh_cmd ${{ inputs.name }} "{
+            ${{ inputs.commands }}
+          }"
+        elif [ -n "${{ inputs.key }}" ]; then
+          $ssh_cmd -i ~/.ssh/${{ inputs.name }}.key ${{ inputs.name }} "{
+            ${{ inputs.commands }}
+          }"
+        else
+          echo "No authentication method provided"
+          exit 1
+        fi
+
+        echo "✅ Successfully executed all commands on host."
+      shell: bash
